@@ -32,7 +32,9 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Collections.Generic;
 using Microsoft.VisualBasic;
-
+using System.Windows.Forms;
+using System.Drawing.Drawing2D;
+using System.IO;
 
 
 /// Provides functions to capture the entire screen, or a particular window, and save it to a file.
@@ -112,7 +114,16 @@ public class ScreenCapture
 
     public void CaptureScreenToFile(string filename, ImageFormat format)
     {
-        Image img = CaptureScreen();
+        Image img = null;
+        using (var form = new Form1())
+        {
+            var result = form.ShowDialog();
+            if (result == DialogResult.OK)
+            {
+                img = form.bitmap;            //values preserved after close
+
+            }
+        }       
         img.Save(filename, format);
     }
 
@@ -251,6 +262,7 @@ public class ScreenCapture
             {
                 Console.WriteLine("Taking a capture of the whole screen to " + file);
                 sc.CaptureScreenToFile(file, format);
+                
             }
             else
             {
@@ -404,5 +416,187 @@ public class ScreenCapture
                 mi.MonitorInfo.Monitor.left,
                 mi.DpiScale);
         }
+    }
+    
+
+
+
+    public class Form1 : Form
+    {
+        public Form1()
+        {
+
+            InitializeComponent();
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.DoubleBuffer, true);
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.WindowState = FormWindowState.Maximized;
+        }
+
+        //These variables control the mouse position
+        
+        public Bitmap bitmap;
+        private bool mouseDown;
+        private Point newPoint = Point.Empty;
+        private Point oldPoint = Point.Empty;
+        private Point startPoint = Point.Empty;
+        public Pen selectPen;
+        private PictureBox pictureBox1;
+        public Brush selectBrush;
+        SolidBrush eraserBrush = new SolidBrush(Color.FromArgb(255, 255, 192));
+
+
+        private void pictureBox1_MouseMove(object sender, MouseEventArgs e)
+        {
+            //validate if there is an image
+            if (pictureBox1.Image == null)
+                return;
+            if (mouseDown)
+            {
+                newPoint = e.Location;
+                pictureBox1.Invalidate();
+                
+            }
+        }
+
+        private void pictureBox1_MouseDown(object sender, MouseEventArgs e)
+        {
+            pictureBox1.DrawToBitmap(bitmap, pictureBox1.ClientRectangle);
+            startPoint = e.Location;
+            mouseDown = true;
+        }
+
+
+        private void DrawRegion(Graphics g)
+        {
+            int x1 = startPoint.X;
+            int y1 = startPoint.Y;
+            int x2 = newPoint.X;
+            int y2 = newPoint.Y;
+
+
+            var oldpointX = oldPoint.X;
+            var oldpointY = oldPoint.Y;
+
+            //block "negative" selection
+            var tX = x2;
+            var tY = y2;
+            if (x1 > x2)
+            {
+                x2 = x1;
+                x1 = tX;
+            }
+            if (y1 > y2)
+            {
+                y2 = y1;
+                y1 = tY;
+            }
+
+            //Draw a red rectangle
+            g.DrawRectangle(selectPen, x1, y1, x2 - x1, y2 - y1);
+            g.FillRectangle(selectBrush, x1, y1, x2 - x1, y2 - y1);
+        }
+
+        private void ClearRegion(Graphics g)
+        {
+            int startPointX = Math.Min(oldPoint.X, startPoint.X);
+            int startPointY = Math.Min(oldPoint.Y, startPoint.Y);
+            int oldPointX = Math.Max(oldPoint.X, startPoint.X);
+            int oldPointY = Math.Max(oldPoint.Y, startPoint.Y);
+
+            int w = Math.Abs(startPointX - oldPointX);
+
+            int h = Math.Abs(startPointY - oldPointY);
+
+            var rectdst = new Rectangle(startPointX - 1, startPointY - 1
+                , Math.Abs(startPointX - oldPointX) + 3, Math.Abs(startPointY - oldPointY) + 3);
+            g.DrawImage(bitmap, rectdst, rectdst, GraphicsUnit.Pixel);
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            //Hide the Form
+            this.Hide();
+            //Create the Bitmap
+            bitmap = new Bitmap(Screen.PrimaryScreen.Bounds.Width,
+                                     Screen.PrimaryScreen.Bounds.Height);
+            //Create the Graphic Variable with screen Dimensions
+            Graphics graphics = Graphics.FromImage(bitmap as Image);
+            //Copy Image from the screen
+            graphics.CopyFromScreen(0, 0, 0, 0, bitmap.Size);
+            //Create a temporal memory stream for the image
+            using (MemoryStream s = new MemoryStream())
+            {
+                //save graphic variable into memory
+                bitmap.Save(s, ImageFormat.Bmp);
+                pictureBox1.Size = new System.Drawing.Size(this.Width, this.Height);
+                //set the picture box with temporary stream
+                pictureBox1.Image = Image.FromStream(s);
+            }
+            //Show Form
+            this.Show();
+            //Cross Cursor
+            Cursor = Cursors.Cross;
+            selectPen = new Pen(Color.White, 2);
+            selectPen.DashStyle = DashStyle.Solid;
+            selectBrush = new SolidBrush(Color.FromArgb(128, 221, 221, 221));
+        }
+
+        private void pictureBox1_MouseUp(object sender, MouseEventArgs e)
+        {
+            mouseDown = false;
+            
+            this.DialogResult = DialogResult.OK;
+            var region = new Rectangle(startPoint, new Size(oldPoint.X - startPoint.X + 1,
+                                                      oldPoint.Y - startPoint.Y + 1));
+            var newBitmap = bitmap.Clone(region, bitmap.PixelFormat);
+            bitmap.Dispose();
+            bitmap = newBitmap;         
+            
+
+        }
+
+        private void InitializeComponent()
+        {
+            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
+            this.SuspendLayout();
+            // 
+            // pictureBox1
+            // 
+            this.pictureBox1.Location = new System.Drawing.Point(0, 0);
+            this.pictureBox1.Name = "pictureBox1";
+            this.pictureBox1.Size = new System.Drawing.Size(100, 50);
+            this.pictureBox1.TabIndex = 0;
+            this.pictureBox1.TabStop = false;
+            this.pictureBox1.MouseMove += new System.Windows.Forms.MouseEventHandler(this.pictureBox1_MouseMove);
+            this.pictureBox1.MouseDown += new System.Windows.Forms.MouseEventHandler(this.pictureBox1_MouseDown);
+            this.pictureBox1.Paint += new System.Windows.Forms.PaintEventHandler(this.pictureBox1_Paint);
+            this.pictureBox1.MouseUp += new System.Windows.Forms.MouseEventHandler(this.pictureBox1_MouseUp);
+            // 
+            // Form1
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Controls.Add(this.pictureBox1);
+            this.DoubleBuffered = true;
+            this.Name = "Form1";
+            this.Load += new System.EventHandler(this.Form1_Load);
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
+            this.ResumeLayout(false);
+
+        }
+
+        private void pictureBox1_Paint(object sender, PaintEventArgs e)
+        {
+            var g = e.Graphics;
+
+            g.SmoothingMode = SmoothingMode.None;
+            
+            ClearRegion(g);
+            oldPoint = newPoint;
+
+            DrawRegion(g);
+
+        }
+
     }
 }
